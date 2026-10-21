@@ -5,7 +5,8 @@ import { forceStrictMode } from "./strict-mode.js";
 // linked in memory to the real server, so tool names, zod schemas, and error
 // text are all exercised. Needs MySQL, skips without it.
 
-const HAS_DB = Boolean(process.env.MYSQL_HOST && process.env.MYSQL_USER && process.env.MYSQL_DATABASE);
+const HAS_DB = Boolean(process.env.MYSQL_HOST && process.env.MYSQL_USER && process.env.MYSQL_DATABASE)
+  && (process.env.DB_DRIVER || "mysql").toLowerCase() !== "sqlite";
 
 describe.skipIf(!HAS_DB)("account tools over MCP (requires MySQL)", () => {
   let pool: import("mysql2/promise").Pool;

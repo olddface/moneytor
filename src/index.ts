@@ -16,7 +16,7 @@ if (config.allowedCidrs.length > 0) {
 }
 
 app.get("/health", (_request, response) => {
-  response.json({ ok: true, service: "moneytor-mcp" });
+  response.json({ ok: true, service: "moneytor-mcp", database: config.driver });
 });
 
 // Phase 1: the secret-slug path maps to the owner (users.id = 1). Real
@@ -52,7 +52,7 @@ app.use((_request, response) => {
 });
 
 const httpServer = app.listen(config.port, () => {
-  console.log(`moneytor MCP listening on :${config.port}`);
+  console.log(`moneytor MCP listening on :${config.port} (${config.driver})`);
   console.log(`MCP endpoint: ${mcpPath}`);
 });
 

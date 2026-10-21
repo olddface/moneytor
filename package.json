@@ -1,7 +1,7 @@
 {
   "name": "moneytor-mcp",
   "version": "0.1.0",
-  "description": "Remote MCP connector for tracking personal income and expenses in MySQL.",
+  "description": "Remote MCP connector for tracking personal income and expenses in MySQL or SQLite.",
   "type": "module",
   "private": true,
   "scripts": {

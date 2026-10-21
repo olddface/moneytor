@@ -12,7 +12,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // never read/update/delete A's rows by id, that listings never bleed across
 // tenants, and that per-user unique keys let both users reuse the same names.
 
-const HAS_DB = Boolean(process.env.MYSQL_HOST && process.env.MYSQL_USER && process.env.MYSQL_DATABASE);
+const HAS_DB = Boolean(process.env.MYSQL_HOST && process.env.MYSQL_USER && process.env.MYSQL_DATABASE)
+  && (process.env.DB_DRIVER || "mysql").toLowerCase() !== "sqlite";
 
 describe.skipIf(!HAS_DB)("tenant isolation (requires MySQL)", () => {
   let repo: typeof import("../src/repository.js");

@@ -1,5 +1,6 @@
-import mysql from "mysql2/promise";
+import type { ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import { config } from "./config.js";
+import { pool, type DbConn } from "./db.js";
 import { nowForMysql, parseEndDate, parseInputDate, parseStartDate } from "./time.js";
 
 export type TransactionType = "income" | "expense";
@@ -64,7 +65,7 @@ export type AverageFilters = Pick<TransactionFilters, "start_date" | "end_date" 
   period?: "day" | "month";
 };
 
-type MysqlTransactionRow = mysql.RowDataPacket & Omit<Transaction, "tags"> & {
+type MysqlTransactionRow = RowDataPacket & Omit<Transaction, "tags"> & {
   tags_json: string | string[];
 };
 
@@ -75,24 +76,12 @@ type QueryParts = {
 
 type SqlParam = string | number | null;
 
-const pool = mysql.createPool({
-  host: config.mysql.host,
-  port: config.mysql.port,
-  user: config.mysql.user,
-  password: config.mysql.password,
-  database: config.mysql.database,
-  waitForConnections: true,
-  connectionLimit: 10,
-  namedPlaceholders: false,
-  timezone: "Z"
-});
-
 export async function closePool(): Promise<void> {
   await pool.end();
 }
 
 export async function listCategories(userId: number): Promise<string[]> {
-  const [rows] = await pool.execute<mysql.RowDataPacket[]>(
+  const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT name FROM categories WHERE user_id = ? ORDER BY name ASC`,
     [userId]
   );
@@ -101,7 +90,7 @@ export async function listCategories(userId: number): Promise<string[]> {
 
 export async function addCategory(userId: number, name: string): Promise<{ name: string }> {
   const trimmed = name.trim();
-  await pool.execute<mysql.ResultSetHeader>(
+  await pool.execute<ResultSetHeader>(
     `INSERT IGNORE INTO categories (user_id, name) VALUES (?, ?)`,
     [userId, trimmed]
   );
@@ -112,11 +101,11 @@ export async function addTransaction(userId: number, input: AddTransactionInput)
   const occurredAt = parseInputDate(input.date);
   const tags = normalizeTags(input.tags);
 
-  const [catRows] = await pool.execute<mysql.RowDataPacket[]>(
+  const [catRows] = await pool.execute<RowDataPacket[]>(
     `SELECT name FROM categories WHERE user_id = ? AND name = ? LIMIT 1`,
     [userId, input.category]
   );
-  const [countRows] = await pool.execute<mysql.RowDataPacket[]>(
+  const [countRows] = await pool.execute<RowDataPacket[]>(
     `SELECT COUNT(*) AS total FROM categories WHERE user_id = ?`,
     [userId]
   );
@@ -130,7 +119,7 @@ export async function addTransaction(userId: number, input: AddTransactionInput)
   const wanted = input.account?.trim();
   const accountId = wanted ? await accountIdByName(userId, wanted) : await defaultAccountId(userId);
 
-  const [result] = await pool.execute<mysql.ResultSetHeader>(
+  const [result] = await pool.execute<ResultSetHeader>(
     `
       INSERT INTO transactions
         (user_id, type, amount, currency, category, description, occurred_at, account_id, tags_json, source, notes)
@@ -225,7 +214,7 @@ export async function updateTransaction(userId: number, input: UpdateTransaction
   params.push(input.id);
   params.push(userId);
 
-  const [result] = await pool.execute<mysql.ResultSetHeader>(
+  const [result] = await pool.execute<ResultSetHeader>(
     `UPDATE transactions SET ${updates.join(", ")} WHERE id = ? AND user_id = ?`,
     params
   );
@@ -238,13 +227,13 @@ export async function updateTransaction(userId: number, input: UpdateTransaction
 }
 
 export async function deleteTransaction(userId: number, id: number): Promise<{ deleted: boolean; id: number }> {
-  const [result] = await pool.execute<mysql.ResultSetHeader>("DELETE FROM transactions WHERE id = ? AND user_id = ?", [id, userId]);
+  const [result] = await pool.execute<ResultSetHeader>("DELETE FROM transactions WHERE id = ? AND user_id = ?", [id, userId]);
   return { deleted: result.affectedRows > 0, id };
 }
 
 export async function deleteTransactions(userId: number, ids: number[]): Promise<{ deleted: number; ids: number[] }> {
   const placeholders = ids.map(() => "?").join(", ");
-  const [result] = await pool.execute<mysql.ResultSetHeader>(
+  const [result] = await pool.execute<ResultSetHeader>(
     `DELETE FROM transactions WHERE id IN (${placeholders}) AND user_id = ?`,
     [...ids, userId]
   );
@@ -255,7 +244,7 @@ export async function getFinanceSummary(userId: number, filters: SummaryFilters)
   const { whereSql, params } = buildWhere(userId, filters);
   const periodFormat = filters.period === "day" ? "%Y-%m-%d" : "%Y-%m";
 
-  const [totals] = await pool.execute<mysql.RowDataPacket[]>(
+  const [totals] = await pool.execute<RowDataPacket[]>(
     `
       SELECT
         COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) AS total_income,
@@ -267,7 +256,7 @@ export async function getFinanceSummary(userId: number, filters: SummaryFilters)
     params
   );
 
-  const [byCategory] = await pool.execute<mysql.RowDataPacket[]>(
+  const [byCategory] = await pool.execute<RowDataPacket[]>(
     `
       SELECT category, type, currency, COUNT(*) AS transaction_count, COALESCE(SUM(amount), 0) AS total
       FROM transactions
@@ -278,7 +267,7 @@ export async function getFinanceSummary(userId: number, filters: SummaryFilters)
     params
   );
 
-  const [byAccount] = await pool.execute<mysql.RowDataPacket[]>(
+  const [byAccount] = await pool.execute<RowDataPacket[]>(
     `
       SELECT account, type, currency,
         COUNT(*) AS transaction_count, COALESCE(SUM(amount), 0) AS total
@@ -294,7 +283,7 @@ export async function getFinanceSummary(userId: number, filters: SummaryFilters)
   );
 
   const periodExpression = `DATE_FORMAT(occurred_at, '${periodFormat}')`;
-  const [byPeriod] = await pool.execute<mysql.RowDataPacket[]>(
+  const [byPeriod] = await pool.execute<RowDataPacket[]>(
     `
       SELECT ${periodExpression} AS period, type, currency,
         COUNT(*) AS transaction_count, COALESCE(SUM(amount), 0) AS total
@@ -329,7 +318,7 @@ export async function getFinanceSummary(userId: number, filters: SummaryFilters)
 export async function getTotalBalance(userId: number, filters: BalanceFilters) {
   const { whereSql, params } = buildWhere(userId, filters as TransactionFilters);
 
-  const [rows] = await pool.execute<mysql.RowDataPacket[]>(
+  const [rows] = await pool.execute<RowDataPacket[]>(
     `
       SELECT
         COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) AS total_income,
@@ -358,7 +347,7 @@ export async function getAverages(userId: number, filters: AverageFilters) {
   const periodFormat = filters.period === "day" ? "%Y-%m-%d" : "%Y-%m";
   const periodExpr = `DATE_FORMAT(occurred_at, '${periodFormat}')`;
 
-  const [byPeriod] = await pool.execute<mysql.RowDataPacket[]>(
+  const [byPeriod] = await pool.execute<RowDataPacket[]>(
     `
       SELECT ${periodExpr} AS period,
         COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) AS period_income,
@@ -546,7 +535,7 @@ function budgetComputeDays(
   return { days_elapsed: effective, days_total, days_remaining: days_total - effective };
 }
 
-function mapPayPeriodRow(row: mysql.RowDataPacket): PayPeriod {
+function mapPayPeriodRow(row: RowDataPacket): PayPeriod {
   return {
     id: Number(row.id),
     period_start: toDateString(row.period_start),
@@ -561,7 +550,7 @@ function mapPayPeriodRow(row: mysql.RowDataPacket): PayPeriod {
 }
 
 async function upsertBudgetGroupInConn(
-  conn: mysql.PoolConnection,
+  conn: DbConn,
   userId: number,
   pay_period_id: number,
   group: GroupInput
@@ -573,7 +562,7 @@ async function upsertBudgetGroupInConn(
     [userId, pay_period_id, group.name, group.amount, group.budget_type ?? "spending"]
   );
 
-  const [rows] = await conn.execute<mysql.RowDataPacket[]>(
+  const [rows] = await conn.execute<RowDataPacket[]>(
     `SELECT id FROM budget_groups WHERE pay_period_id = ? AND name = ? AND user_id = ? LIMIT 1`,
     [pay_period_id, group.name, userId]
   );
@@ -594,7 +583,7 @@ async function upsertBudgetGroupInConn(
 }
 
 async function fetchBudgetGroupsWithCategories(userId: number, pay_period_id: number): Promise<BudgetGroup[]> {
-  const [rows] = await pool.execute<mysql.RowDataPacket[]>(
+  const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT bg.id, bg.pay_period_id, bg.name, bg.amount, bg.budget_type, bgc.category
      FROM budget_groups bg
      LEFT JOIN budget_group_categories bgc ON bgc.budget_group_id = bg.id
@@ -654,11 +643,11 @@ export async function createPayPeriod(userId: number, input: {
   salary_txn_id?: number;
   notes?: string;
 }): Promise<PayPeriod> {
-  const [result] = await pool.execute<mysql.ResultSetHeader>(
+  const [result] = await pool.execute<ResultSetHeader>(
     `INSERT INTO pay_periods (user_id, period_start, salary_amount, salary_txn_id, notes) VALUES (?, ?, ?, ?, ?)`,
     [userId, input.period_start, input.salary_amount, input.salary_txn_id ?? null, input.notes ?? null]
   );
-  const [rows] = await pool.execute<mysql.RowDataPacket[]>(`SELECT * FROM pay_periods WHERE id = ? AND user_id = ? LIMIT 1`, [result.insertId, userId]);
+  const [rows] = await pool.execute<RowDataPacket[]>(`SELECT * FROM pay_periods WHERE id = ? AND user_id = ? LIMIT 1`, [result.insertId, userId]);
   return mapPayPeriodRow(rows[0]);
 }
 
@@ -667,13 +656,13 @@ export async function closePayPeriod(userId: number, period_id: number, period_e
     `UPDATE pay_periods SET period_end = ?, status = 'closed', updated_at = NOW() WHERE id = ? AND user_id = ?`,
     [period_end, period_id, userId]
   );
-  const [rows] = await pool.execute<mysql.RowDataPacket[]>(`SELECT * FROM pay_periods WHERE id = ? AND user_id = ? LIMIT 1`, [period_id, userId]);
+  const [rows] = await pool.execute<RowDataPacket[]>(`SELECT * FROM pay_periods WHERE id = ? AND user_id = ? LIMIT 1`, [period_id, userId]);
   if (rows.length === 0) throw new Error(`Pay period ${period_id} not found`);
   return mapPayPeriodRow(rows[0]);
 }
 
 export async function getCurrentPeriod(userId: number): Promise<PayPeriodWithDays | null> {
-  const [rows] = await pool.execute<mysql.RowDataPacket[]>(
+  const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT * FROM pay_periods WHERE user_id = ? AND status IN ('active','estimated') ORDER BY period_start DESC LIMIT 1`,
     [userId]
   );
@@ -683,7 +672,7 @@ export async function getCurrentPeriod(userId: number): Promise<PayPeriodWithDay
 }
 
 export async function listPayPeriods(userId: number, limit = 6): Promise<PayPeriodWithDays[]> {
-  const [rows] = await pool.execute<mysql.RowDataPacket[]>(
+  const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT * FROM pay_periods WHERE user_id = ? ORDER BY period_start DESC LIMIT ${Number(limit)}`, [userId]
   );
   return rows.map((row) => {
@@ -697,7 +686,7 @@ export async function listPayPeriods(userId: number, limit = 6): Promise<PayPeri
 // Throws "not found" (never "forbidden") if the pay period doesn't exist OR
 // belongs to another user — never leak existence across tenants.
 async function assertPayPeriodOwned(userId: number, pay_period_id: number): Promise<void> {
-  const [rows] = await pool.execute<mysql.RowDataPacket[]>(
+  const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT id FROM pay_periods WHERE id = ? AND user_id = ? LIMIT 1`,
     [pay_period_id, userId]
   );
@@ -739,14 +728,14 @@ export async function getBudgetGroups(userId: number, pay_period_id: number): Pr
 }
 
 export async function deleteBudgetGroup(userId: number, group_id: number): Promise<{ deleted: number }> {
-  const [result] = await pool.execute<mysql.ResultSetHeader>(`DELETE FROM budget_groups WHERE id = ? AND user_id = ?`, [group_id, userId]);
+  const [result] = await pool.execute<ResultSetHeader>(`DELETE FROM budget_groups WHERE id = ? AND user_id = ?`, [group_id, userId]);
   return { deleted: result.affectedRows };
 }
 
 // Budget Summary
 
 export async function getBudgetSummary(userId: number, pay_period_id: number, transactions: InputTransaction[]) {
-  const [pRows] = await pool.execute<mysql.RowDataPacket[]>(`SELECT * FROM pay_periods WHERE id = ? AND user_id = ? LIMIT 1`, [pay_period_id, userId]);
+  const [pRows] = await pool.execute<RowDataPacket[]>(`SELECT * FROM pay_periods WHERE id = ? AND user_id = ? LIMIT 1`, [pay_period_id, userId]);
   if (pRows.length === 0) throw new Error(`Pay period ${pay_period_id} not found`);
   const period = mapPayPeriodRow(pRows[0]);
 
@@ -830,23 +819,23 @@ export async function saveBudgetTemplate(userId: number, name: string, groups: G
      ON DUPLICATE KEY UPDATE groups_json = VALUES(groups_json), updated_at = NOW()`,
     [userId, name, JSON.stringify(groups)]
   );
-  const [rows] = await pool.execute<mysql.RowDataPacket[]>(`SELECT * FROM budget_templates WHERE name = ? AND user_id = ? LIMIT 1`, [name, userId]);
+  const [rows] = await pool.execute<RowDataPacket[]>(`SELECT * FROM budget_templates WHERE name = ? AND user_id = ? LIMIT 1`, [name, userId]);
   return mapTemplateRow(rows[0]);
 }
 
 export async function listBudgetTemplates(userId: number): Promise<BudgetTemplate[]> {
-  const [rows] = await pool.execute<mysql.RowDataPacket[]>(`SELECT * FROM budget_templates WHERE user_id = ? ORDER BY name`, [userId]);
+  const [rows] = await pool.execute<RowDataPacket[]>(`SELECT * FROM budget_templates WHERE user_id = ? ORDER BY name`, [userId]);
   return rows.map(mapTemplateRow);
 }
 
 export async function deleteBudgetTemplate(userId: number, template_id: number): Promise<{ deleted: number }> {
-  const [result] = await pool.execute<mysql.ResultSetHeader>(`DELETE FROM budget_templates WHERE id = ? AND user_id = ?`, [template_id, userId]);
+  const [result] = await pool.execute<ResultSetHeader>(`DELETE FROM budget_templates WHERE id = ? AND user_id = ?`, [template_id, userId]);
   return { deleted: result.affectedRows };
 }
 
 export async function applyBudgetTemplate(userId: number, pay_period_id: number, template_id: number): Promise<{ applied: number }> {
   await assertPayPeriodOwned(userId, pay_period_id);
-  const [tRows] = await pool.execute<mysql.RowDataPacket[]>(`SELECT * FROM budget_templates WHERE id = ? AND user_id = ? LIMIT 1`, [template_id, userId]);
+  const [tRows] = await pool.execute<RowDataPacket[]>(`SELECT * FROM budget_templates WHERE id = ? AND user_id = ? LIMIT 1`, [template_id, userId]);
   if (tRows.length === 0) throw new Error(`Template ${template_id} not found`);
 
   const groups: GroupInput[] = typeof tRows[0].groups_json === "string"
@@ -870,7 +859,7 @@ export async function applyBudgetTemplate(userId: number, pay_period_id: number,
   }
 }
 
-function mapTemplateRow(row: mysql.RowDataPacket): BudgetTemplate {
+function mapTemplateRow(row: RowDataPacket): BudgetTemplate {
   return {
     id: Number(row.id),
     name: String(row.name),
@@ -922,7 +911,7 @@ const ACCOUNT_BALANCE_SQL = `(
 
 export type AccountWithBalance = Account & { balance: number };
 
-function mapAccount(row: mysql.RowDataPacket): Account {
+function mapAccount(row: RowDataPacket): Account {
   return {
     id: Number(row.id),
     name: String(row.name),
@@ -937,11 +926,13 @@ function mapAccount(row: mysql.RowDataPacket): Account {
 
 function isNameTaken(e: unknown): boolean {
   const err = e as { errno?: number; message?: string };
-  return err.errno === 1062 && String(err.message).includes("uq_accounts_user_name");
+  const message = String(err.message ?? "");
+  if (err.errno === 1062 && message.includes("uq_accounts_user_name")) return true;
+  return message.includes("UNIQUE constraint failed") && message.includes("accounts.name");
 }
 
 async function requireAccount(userId: number, name: string): Promise<Account> {
-  const [rows] = await pool.execute<mysql.RowDataPacket[]>(
+  const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT ${ACCOUNT_COLS} FROM accounts WHERE user_id = ? AND name = ? LIMIT 1`,
     [userId, name.trim()]
   );
@@ -954,7 +945,7 @@ async function requireAccount(userId: number, name: string): Promise<Account> {
 }
 
 export async function listAccounts(userId: number, includeArchived = false): Promise<AccountWithBalance[]> {
-  const [rows] = await pool.execute<mysql.RowDataPacket[]>(
+  const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT ${ACCOUNT_COLS}, ${ACCOUNT_BALANCE_SQL} AS balance FROM accounts WHERE user_id = ? ${includeArchived ? "" : "AND archived_at IS NULL"} ORDER BY is_default DESC, name ASC`,
     [userId]
   );
@@ -1032,7 +1023,7 @@ export async function removeAccount(userId: number, name: string): Promise<{ acc
   try {
     await conn.beginTransaction();
     await conn.execute(`SELECT id FROM accounts WHERE id = ? AND user_id = ? FOR UPDATE`, [acc.id, userId]);
-    const [used] = await conn.execute<mysql.RowDataPacket[]>(
+    const [used] = await conn.execute<RowDataPacket[]>(
       `
         SELECT
           (SELECT COUNT(*) FROM transactions WHERE user_id = ? AND account_id = ?) +
@@ -1071,7 +1062,7 @@ async function accountIdByName(userId: number, name: string): Promise<number> {
 
 // A user with no accounts yet keeps recording without one.
 async function defaultAccountId(userId: number): Promise<number | null> {
-  const [rows] = await pool.execute<mysql.RowDataPacket[]>(
+  const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT id FROM accounts WHERE user_id = ? AND is_default = 1 LIMIT 1`,
     [userId]
   );
@@ -1110,7 +1101,7 @@ const TRANSFER_COLS = "t.id, fa.name AS from_account, ta.name AS to_account, t.a
 const TRANSFER_FROM =
   "FROM transfers t JOIN accounts fa ON fa.id = t.from_account_id AND fa.user_id = t.user_id JOIN accounts ta ON ta.id = t.to_account_id AND ta.user_id = t.user_id";
 
-function mapTransfer(row: mysql.RowDataPacket): Transfer {
+function mapTransfer(row: RowDataPacket): Transfer {
   return {
     id: Number(row.id),
     from_account: String(row.from_account),
@@ -1134,9 +1125,9 @@ export async function transferBetweenAccounts(userId: number, input: TransferInp
     // One lock per statement, lowest id first. A single IN (?, ?) query locks in
     // whatever order the optimizer scans, and two opposite transfers deadlocked on it.
     // Locking first also means the archived check sees rows nobody can change.
-    const locked: mysql.RowDataPacket[] = [];
+    const locked: RowDataPacket[] = [];
     for (const id of [from.id, to.id].sort((a, b) => a - b)) {
-      const [rows] = await conn.execute<mysql.RowDataPacket[]>(
+      const [rows] = await conn.execute<RowDataPacket[]>(
         `SELECT name, archived_at FROM accounts WHERE id = ? AND user_id = ? FOR UPDATE`,
         [id, userId]
       );
@@ -1145,7 +1136,7 @@ export async function transferBetweenAccounts(userId: number, input: TransferInp
     const archived = locked.find((a) => a.archived_at !== null);
     if (archived) throw new Error(`Account "${archived.name}" is archived. Transfers need two active accounts.`);
 
-    const [res] = await conn.execute<mysql.ResultSetHeader>(
+    const [res] = await conn.execute<ResultSetHeader>(
       `INSERT INTO transfers (user_id, from_account_id, to_account_id, amount, occurred_at, notes) VALUES (?, ?, ?, ?, ?, ?)`,
       [userId, from.id, to.id, input.amount, parseInputDate(input.date), input.notes ?? null]
     );
@@ -1160,7 +1151,7 @@ export async function transferBetweenAccounts(userId: number, input: TransferInp
 }
 
 async function getTransfer(userId: number, id: number): Promise<Transfer> {
-  const [rows] = await pool.execute<mysql.RowDataPacket[]>(
+  const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT ${TRANSFER_COLS} ${TRANSFER_FROM} WHERE t.id = ? AND t.user_id = ? LIMIT 1`,
     [id, userId]
   );
@@ -1183,7 +1174,7 @@ export async function listTransfers(userId: number, filters: TransferFilters): P
   const limit = filters.limit ?? 100;
   const offset = filters.offset ?? 0;
 
-  const [rows] = await pool.execute<mysql.RowDataPacket[]>(
+  const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT ${TRANSFER_COLS} ${TRANSFER_FROM} ${whereSql} ORDER BY t.occurred_at DESC, t.id DESC LIMIT ${limit} OFFSET ${offset}`,
     params
   );
@@ -1191,13 +1182,13 @@ export async function listTransfers(userId: number, filters: TransferFilters): P
 }
 
 export async function deleteTransfer(userId: number, id: number): Promise<{ deleted: boolean; id: number }> {
-  const [result] = await pool.execute<mysql.ResultSetHeader>(`DELETE FROM transfers WHERE id = ? AND user_id = ?`, [id, userId]);
+  const [result] = await pool.execute<ResultSetHeader>(`DELETE FROM transfers WHERE id = ? AND user_id = ?`, [id, userId]);
   return { deleted: result.affectedRows > 0, id };
 }
 
 // Transactions whose account is unknown: everything recorded before accounts existed.
 export async function getUnknownAccountBalance(userId: number): Promise<{ balance: number; transaction_count: number }> {
-  const [rows] = await pool.execute<mysql.RowDataPacket[]>(
+  const [rows] = await pool.execute<RowDataPacket[]>(
     `
       SELECT COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE -amount END), 0) AS balance, COUNT(*) AS n
       FROM transactions
@@ -1226,7 +1217,7 @@ export async function reconcileAccount(userId: number, name: string, actualBalan
     await conn.beginTransaction();
     // The lock stops a new transaction or transfer landing between reading the balance and writing the adjustment.
     await conn.execute(`SELECT id FROM accounts WHERE id = ? AND user_id = ? FOR UPDATE`, [acc.id, userId]);
-    const [rows] = await conn.execute<mysql.RowDataPacket[]>(
+    const [rows] = await conn.execute<RowDataPacket[]>(
       `SELECT ${ACCOUNT_BALANCE_SQL} AS balance FROM accounts WHERE id = ? AND user_id = ?`,
       [acc.id, userId]
     );
@@ -1235,7 +1226,7 @@ export async function reconcileAccount(userId: number, name: string, actualBalan
 
     let adjustmentId: number | null = null;
     if (difference !== 0) {
-      const [res] = await conn.execute<mysql.ResultSetHeader>(
+      const [res] = await conn.execute<ResultSetHeader>(
         `INSERT INTO account_adjustments (user_id, account_id, amount, occurred_at, notes) VALUES (?, ?, ?, ?, ?)`,
         [userId, acc.id, difference, nowForMysql(), notes ?? null]
       );

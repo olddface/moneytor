@@ -5,7 +5,8 @@ import { forceStrictMode } from "./strict-mode.js";
 // figure. Reports are taken on old-style data, then again after all three exist.
 // Needs MySQL, skips without it.
 
-const HAS_DB = Boolean(process.env.MYSQL_HOST && process.env.MYSQL_USER && process.env.MYSQL_DATABASE);
+const HAS_DB = Boolean(process.env.MYSQL_HOST && process.env.MYSQL_USER && process.env.MYSQL_DATABASE)
+  && (process.env.DB_DRIVER || "mysql").toLowerCase() !== "sqlite";
 
 describe.skipIf(!HAS_DB)("reports ignore accounts, transfers, and adjustments (requires MySQL)", () => {
   let repo: typeof import("../src/repository.js");

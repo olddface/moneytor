@@ -4,7 +4,8 @@ import { forceStrictMode } from "./strict-mode.js";
 // Needs a real MySQL (same env vars as isolation.test.ts) and skips without one.
 // Works on two throwaway users it creates itself, so it never touches user 1.
 
-const HAS_DB = Boolean(process.env.MYSQL_HOST && process.env.MYSQL_USER && process.env.MYSQL_DATABASE);
+const HAS_DB = Boolean(process.env.MYSQL_HOST && process.env.MYSQL_USER && process.env.MYSQL_DATABASE)
+  && (process.env.DB_DRIVER || "mysql").toLowerCase() !== "sqlite";
 
 
 describe.skipIf(!HAS_DB)("accounts (requires MySQL)", () => {

@@ -1,11 +1,11 @@
 # Moneytor MCP
 
-Remote MCP server for tracking personal income and expenses from Claude.ai. It exposes tools to add, list, update, delete, and summarize transactions stored in MySQL.
+Remote MCP server for tracking personal income and expenses from Claude.ai. It exposes tools to add, list, update, delete, and summarize transactions stored in MySQL or SQLite.
 
 ## Requirements
 
-- Node.js 20+
-- MySQL 5.7+ or 8+
+- Node.js 20+ for MySQL. SQLite mode needs Node.js 24, or Node.js 22 with `--experimental-sqlite` (built-in `node:sqlite`).
+- MySQL 5.7+ or 8+, or a local SQLite file
 - Public HTTPS endpoint on your VPS
 - Reverse proxy such as Nginx or Caddy
 
@@ -20,12 +20,22 @@ cp .env.example .env
 
 Edit `.env`:
 
-- `MYSQL_*`: MySQL connection for the `moneytor` database.
+- `DB_DRIVER`: `mysql` (default) or `sqlite`.
+- `MYSQL_*`: MySQL connection for the `moneytor` database. Required when `DB_DRIVER=mysql`.
+- `SQLITE_PATH`: SQLite file used when `DB_DRIVER=sqlite`. Defaults to `data/moneytor.sqlite`.
 - `DEFAULT_CURRENCY`: default transaction currency, for example `IDR`.
 - `MCP_SECRET_SLUG`: long random path segment for the MCP URL.
 - `ALLOWED_CIDRS`: optional app-level IP allowlist. Keep `127.0.0.1/32` while testing locally.
 
-Create the database and user in MySQL, then run:
+For SQLite, set the driver and run migrate. `npm run migrate` creates the file and applies `migrations/sqlite`. Those scripts are the current schema; they are not translations of the MySQL files in `migrations/`.
+
+```bash
+# .env
+DB_DRIVER=sqlite
+SQLITE_PATH=./data/moneytor.sqlite
+```
+
+Create the MySQL database and user when `DB_DRIVER=mysql`. Then, for either driver, run:
 
 ```bash
 npm run migrate
