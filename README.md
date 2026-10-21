@@ -1,6 +1,6 @@
 # Moneytor MCP
 
-Remote MCP server for tracking personal income and expenses from Claude.ai. It exposes tools to add, list, update, delete, and summarize transactions stored in MySQL or SQLite.
+Remote MCP server for tracking personal income and expenses from Claude.ai/gemini/and others. It exposes tools to add, list, update, delete, and summarize transactions stored in MySQL or SQLite.
 
 ## Requirements
 
