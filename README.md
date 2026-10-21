@@ -9,7 +9,7 @@ Remote MCP server for tracking personal income and expenses from Claude.ai/gemin
 - Public HTTPS endpoint on your VPS
 - Reverse proxy such as Nginx or Caddy
 
-Claude.ai custom connectors need a reachable remote MCP endpoint. Local stdio MCP servers are for local clients, not Claude.ai web connectors.
+Remote clients such as Claude.ai, Gemini, and other AI apps need a reachable remote MCP endpoint. Local stdio MCP servers are for local clients, not those web connectors.
 
 ## Setup
 
